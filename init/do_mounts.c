@@ -167,6 +167,19 @@ done:
 	}
 	return res;
 }
+
+
+static int match_dev_by_label(struct device *dev, const void *data)
+  {
+        const char *label = data;
+        struct hd_struct *part = dev_to_part(dev);
+
+        if (part->info && !strcmp(label, part->info->volname))
+                return 1;
+
+        return 0;
+  }
+
 #endif
 
 /*
@@ -210,6 +223,17 @@ dev_t name_to_dev_t(const char *name)
 		res = devt_from_partuuid(name);
 		if (!res)
 			goto fail;
+		goto done;
+	} else if (strncmp(name, "PARTLABEL=", 10) == 0) {
+		struct device *dev;
+
+		dev = class_find_device(&block_class, NULL, name + 10,
+					&match_dev_by_label);
+		if (!dev)
+			goto fail;
+
+		res = dev->devt;
+		put_device(dev);
 		goto done;
 	}
 #endif

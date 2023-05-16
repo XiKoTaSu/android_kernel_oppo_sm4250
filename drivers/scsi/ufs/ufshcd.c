@@ -3,7 +3,7 @@
  *
  * This code is based on drivers/scsi/ufs/ufshcd.c
  * Copyright (C) 2011-2013 Samsung India Software Operations
- * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2013-2020, The Linux Foundation. All rights reserved.
  *
  * Authors:
  *	Santosh Yaraganavi <santosh.sy@samsung.com>
@@ -3832,6 +3832,7 @@ static int ufshcd_queuecommand(struct Scsi_Host *host, struct scsi_cmnd *cmd)
 
 	err = ufshcd_map_sg(hba, lrbp);
 	if (err) {
+		ufshcd_release(hba, false);
 		lrbp->cmd = NULL;
 		clear_bit_unlock(tag, &hba->lrb_in_use);
 		ufshcd_release_all(hba);
@@ -9510,14 +9511,13 @@ static int ufshcd_ioctl(struct scsi_device *dev, int cmd, void __user *buffer)
 	int err = 0;
 
 	BUG_ON(!hba);
+	if (!buffer) {
+		dev_err(hba->dev, "%s: User buffer is NULL!\n", __func__);
+		return -EINVAL;
+	}
 
 	switch (cmd) {
 	case UFS_IOCTL_QUERY:
-		if (!buffer) {
-			dev_err(hba->dev, "%s: User buffer is NULL!\n",
-				 __func__);
-			return -EINVAL;
-		}
 		pm_runtime_get_sync(hba->dev);
 		err = ufshcd_query_ioctl(hba, ufshcd_scsi_to_upiu_lun(dev->lun),
 				buffer);
@@ -10562,6 +10562,13 @@ static int ufshcd_resume(struct ufs_hba *hba, enum ufs_pm_op pm_op)
 	ret = ufshcd_enable_clocks(hba);
 	if (ret)
 		goto disable_vreg;
+	/*
+	 * If scsi host is in recovery mode, force the link to STATE_OFF, so
+	 * that we do a full reset and restore instead of sending the SSU cmd,
+	 * as SSU cmd can be blocked by SCSI layer, see scsi_host_queue_ready().
+	 */
+	if (unlikely(scsi_host_in_recovery(hba->host)))
+		ufshcd_set_link_off(hba);
 
 	/* enable the host irq as host controller would be active soon */
 	ufshcd_enable_irq(hba);

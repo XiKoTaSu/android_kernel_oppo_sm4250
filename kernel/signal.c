@@ -55,7 +55,13 @@
 #include <asm/unistd.h>
 #include <asm/siginfo.h>
 #include <asm/cacheflush.h>
+#if defined(OPLUS_FEATURE_HANS_FREEZE) && defined(CONFIG_OPLUS_FEATURE_HANS)
+#include <linux/hans.h>
+#endif /*OPLUS_FEATURE_HANS_FREEZE*/
 #include "audit.h"	/* audit_signal_info() */
+#ifdef OPLUS_BUG_STABILITY
+#include <soc/oplus/system/oppo_process.h>
+#endif
 
 /*
  * SLAB caches for signal bits.
@@ -391,17 +397,16 @@ static bool task_participate_group_stop(struct task_struct *task)
 
 void task_join_group_stop(struct task_struct *task)
 {
-	unsigned long mask = current->jobctl & JOBCTL_STOP_SIGMASK;
-	struct signal_struct *sig = current->signal;
-
-	if (sig->group_stop_count) {
-		sig->group_stop_count++;
-		mask |= JOBCTL_STOP_CONSUME;
-	} else if (!(sig->flags & SIGNAL_STOP_STOPPED))
-		return;
-
 	/* Have the new thread join an on-going signal group stop */
-	task_set_jobctl_pending(task, mask | JOBCTL_STOP_PENDING);
+	unsigned long jobctl = current->jobctl;
+	if (jobctl & JOBCTL_STOP_PENDING) {
+		struct signal_struct *sig = current->signal;
+		unsigned long signr = jobctl & JOBCTL_STOP_SIGMASK;
+		unsigned long gstop = JOBCTL_STOP_PENDING | JOBCTL_STOP_CONSUME;
+		if (task_set_jobctl_pending(task, signr | gstop)) {
+			sig->group_stop_count++;
+		}
+	}
 }
 
 /*
@@ -1097,6 +1102,22 @@ static int __send_signal(int sig, struct siginfo *info, struct task_struct *t,
 	assert_spin_locked(&t->sighand->siglock);
 
 	result = TRACE_SIGNAL_IGNORED;
+#ifdef OPLUS_BUG_STABILITY
+        if(1) {
+                /*add the SIGKILL print log for some debug*/
+                if((sig == SIGHUP || sig == 33 || sig == SIGKILL || sig == SIGSTOP || sig == SIGABRT || sig == SIGTERM || sig == SIGCONT) && is_key_process(t)) {
+                        //#ifdef OPLUS_BUG_STABILITY
+                        //dump_stack();
+                        //#endif
+                        printk("Some other process %d:%s want to send sig:%d to pid:%d tgid:%d comm:%s\n", current->pid, current->comm,sig, t->pid, t->tgid, t->comm);
+                }
+#ifdef CONFIG_OPPO_SPECIAL_BUILD
+                else if (sig == SIGSTOP){
+                    printk("Process %d:%s want to send SIGSTOP to %d:%s\n", current->pid, current->comm, t->pid, t->comm);
+                }
+#endif
+        }
+#endif
 	if (!prepare_signal(sig, t,
 			from_ancestor_ns || (info == SEND_SIG_PRIV) || (info == SEND_SIG_FORCED)))
 		goto ret;
@@ -1270,6 +1291,10 @@ int do_send_sig_info(int sig, struct siginfo *info, struct task_struct *p,
 	unsigned long flags;
 	int ret = -ESRCH;
 
+#if defined(OPLUS_FEATURE_HANS_FREEZE) && defined(CONFIG_OPLUS_FEATURE_HANS)
+	hans_check_signal(p, sig);
+#endif /*OPLUS_FEATURE_HANS_FREEZE*/
+
 	if (lock_task_sighand(p, &flags)) {
 		ret = send_signal(sig, info, p, type);
 		unlock_task_sighand(p, &flags);
@@ -1375,6 +1400,7 @@ struct sighand_struct *__lock_task_sighand(struct task_struct *tsk,
 	return sighand;
 }
 
+#define REAPER_SZ (SZ_1M * 32 / PAGE_SIZE)
 /*
  * send signal info to all the members of a group
  */
@@ -1390,13 +1416,21 @@ int group_send_sig_info(int sig, struct siginfo *info, struct task_struct *p,
 	if (!ret && sig) {
 		check_panic_on_foreground_kill(p);
 		ret = do_send_sig_info(sig, info, p, type);
-		if (capable(CAP_KILL) && sig == SIGKILL) {
-			if (!strcmp(current->comm, ULMK_MAGIC))
+
+		if (!ret && sig == SIGKILL) {
+			unsigned long pages = 0;
+
+			task_lock(p);
+			if (p->mm)
+				pages = get_mm_counter(p->mm, MM_ANONPAGES) +
+					get_mm_counter(p->mm, MM_SWAPENTS);
+			task_unlock(p);
+
+			if (pages > REAPER_SZ)
 				add_to_oom_reaper(p);
 			ulmk_update_last_kill();
 		}
 	}
-
 	return ret;
 }
 
@@ -1924,10 +1958,6 @@ bool do_notify_parent(struct task_struct *tsk, int sig)
 		if (psig->action[SIGCHLD-1].sa.sa_handler == SIG_IGN)
 			sig = 0;
 	}
-	/*
-	 * Send with __send_signal as si_pid and si_uid are in the
-	 * parent's namespaces.
-	 */
 	if (valid_signal(sig) && sig)
 		__send_signal(sig, &info, tsk->parent, PIDTYPE_TGID, false);
 	__wake_up_parent(tsk, tsk->parent);
@@ -2683,7 +2713,7 @@ relock:
 }
 
 /**
- * signal_delivered - 
+ * signal_delivered -
  * @ksig:		kernel signal struct
  * @stepping:		nonzero if debugger single-step or block-step in use
  *
@@ -4031,7 +4061,7 @@ COMPAT_SYSCALL_DEFINE4(rt_sigaction, int, sig,
 
 	ret = do_sigaction(sig, act ? &new_ka : NULL, oact ? &old_ka : NULL);
 	if (!ret && oact) {
-		ret = put_user(ptr_to_compat(old_ka.sa.sa_handler), 
+		ret = put_user(ptr_to_compat(old_ka.sa.sa_handler),
 			       &oact->sa_handler);
 		ret |= put_compat_sigset(&oact->sa_mask, &old_ka.sa.sa_mask,
 					 sizeof(oact->sa_mask));
@@ -4210,7 +4240,7 @@ SYSCALL_DEFINE2(rt_sigsuspend, sigset_t __user *, unewset, size_t, sigsetsize)
 		return -EFAULT;
 	return sigsuspend(&newset);
 }
- 
+
 #ifdef CONFIG_COMPAT
 COMPAT_SYSCALL_DEFINE2(rt_sigsuspend, compat_sigset_t __user *, unewset, compat_size_t, sigsetsize)
 {
