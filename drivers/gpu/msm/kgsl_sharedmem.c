@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
- * Copyright (c) 2002,2007-2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2002,2007-2021, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <asm/cacheflush.h>
@@ -335,6 +336,13 @@ void kgsl_process_init_sysfs(struct kgsl_device *device,
 	kgsl_reclaim_proc_sysfs_init(private);
 }
 
+#if defined(OPLUS_FEATURE_HEALTHINFO) || defined(CONFIG_OPPO_HEALTHINFO)
+unsigned long gpu_total(void)
+{
+	return (unsigned long)atomic_long_read(&kgsl_driver.stats.page_alloc);
+}
+#endif /*OPLUS_FEATURE_HEALTHINFO*/
+
 static ssize_t memstat_show(struct device *dev,
 			 struct device_attribute *attr, char *buf)
 {
@@ -511,8 +519,6 @@ static int kgsl_page_alloc_vmfault(struct kgsl_memdesc *memdesc,
 
 	vmf->page = page;
 
-	atomic_long_add(PAGE_SIZE, &memdesc->mapsize);
-
 	return 0;
 }
 
@@ -592,6 +598,9 @@ static int kgsl_unlock_sgt(struct sg_table *sgt)
 
 static void kgsl_page_alloc_free(struct kgsl_memdesc *memdesc)
 {
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
+
 	kgsl_page_alloc_unmap_kernel(memdesc);
 	/* we certainly do not expect the hostptr to still be mapped */
 	BUG_ON(memdesc->hostptr);
@@ -685,14 +694,15 @@ static int kgsl_contiguous_vmfault(struct kgsl_memdesc *memdesc,
 	else if (ret == -EFAULT)
 		return VM_FAULT_SIGBUS;
 
-	atomic_long_add(PAGE_SIZE, &memdesc->mapsize);
-
 	return VM_FAULT_NOPAGE;
 }
 
 static void kgsl_cma_coherent_free(struct kgsl_memdesc *memdesc)
 {
 	unsigned long attrs = 0;
+
+	if (memdesc->priv & KGSL_MEMDESC_MAPPED)
+		return;
 
 	if (memdesc->hostptr) {
 		if (memdesc->priv & KGSL_MEMDESC_SECURE) {
@@ -928,6 +938,7 @@ void kgsl_memdesc_init(struct kgsl_device *device,
 		ilog2(PAGE_SIZE));
 	kgsl_memdesc_set_align(memdesc, align);
 	spin_lock_init(&memdesc->lock);
+	spin_lock_init(&memdesc->gpuaddr_lock);
 }
 
 static int kgsl_shmem_alloc_page(struct page **pages,
@@ -1239,7 +1250,8 @@ void kgsl_sharedmem_free(struct kgsl_memdesc *memdesc)
 
 	if (memdesc->sgt) {
 		sg_free_table(memdesc->sgt);
-		kvfree(memdesc->sgt);
+		kfree(memdesc->sgt);
+		memdesc->sgt = NULL;
 	}
 
 	memdesc->page_count = 0;
