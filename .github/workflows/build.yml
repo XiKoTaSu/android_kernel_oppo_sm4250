@@ -21,20 +21,21 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install git automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python2 python3
-          sudo update-alternatives --install /usr/bin/python python /usr/bin/python2 1
-          sudo update-alternatives --config python  # 选择python2作为默认
           mkdir -p $GITHUB_WORKSPACE/workdir
           cd $GITHUB_WORKSPACE/workdir
           echo "BUILD_TIME=$(TZ=Asia/Shanghai date "+%Y%m%d%H%M")" >> $GITHUB_ENV
-      - name: 獲取 ZyCromerZ-Clang20 工具鏈
+          sudo ln -sf /usr/bin/python2.7 /usr/bin/python
+      - name: 獲取 AOSP Clang-r450784d 工具鏈
         run: |
-          wget https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20241109-release/Clang-20.0.0git-20241109.tar.gz -O $GITHUB_WORKSPACE/workdir/zyc_clang20.tar.gz
+          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz -O $GITHUB_WORKSPACE/workdir/aosp_clang-r450784d.tar.gz
           mkdir $GITHUB_WORKSPACE/workdir/clang
-          tar zxvf $GITHUB_WORKSPACE/workdir/zyc_clang20.tar.gz -C $GITHUB_WORKSPACE/workdir/clang
+          tar zxvf $GITHUB_WORKSPACE/workdir/aosp_clang-r450784d.tar.gz -C $GITHUB_WORKSPACE/workdir/clang
+      - name: 獲取 GCC4.9 工具鏈
+        run: |
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-9.0.0_r61 --depth=1 $GITHUB_WORKSPACE/workdir/gcc
       - name: 獲取核心源碼
         run: |
           git clone --recursive https://github.com/$GITHUB_REPOSITORY/ -b ${{ steps.branch-names.outputs.current_branch }} --depth 1 $GITHUB_WORKSPACE/workdir/source
-
       - name: 設定 Ccache 嘅容量
         uses: hendrikmuhs/ccache-action@v1.2
         with:
@@ -48,14 +49,13 @@ jobs:
           export ARCH="arm64"
           export SUBARCH="arm64"
           export CROSS_COMPILE="$GITHUB_WORKSPACE/workdir/gcc/bin/aarch64-linux-android-"          
-          export PATH="$GITHUB_WORKSPACE/workdir/clang/bin:$PATH"
+          export PATH="$GITHUB_WORKSPACE/workdir/clang/bin:$GITHUB_WORKSPACE/workdir/gcc/bin/:$PATH"
           export LLVM=1
           export CC="ccache clang"
           export LD="ld.lld"
           cd $GITHUB_WORKSPACE/workdir/source
           make O=out vendor/bengal-perf_defconfig
           make -j$(nproc --all) O=out 2>&1 | tee kernel.log
-
       - name: 上傳編譯日志
         uses: actions/upload-artifact@v4
         with:
@@ -66,5 +66,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KERNEL
-          path: workdir/source/arch/arm64/boot/Image.gz
+          path: workdir/source/arch/arm64/boot/Image.gz-dtb
         
