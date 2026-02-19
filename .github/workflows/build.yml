@@ -1,0 +1,74 @@
+name: build
+on:
+  workflow_call:
+  workflow_dispatch:
+jobs:
+  build:
+    name: ${{ github.actor }}編譯核心
+    runs-on: ubuntu-22.04
+    steps:
+
+      - name: 獲取分支嘅名稱
+        id: branch-names
+        uses: tj-actions/branch-names@v8
+
+      - name: 設定5GIB嘅SWAP
+        uses: pierotofy/set-swap-space@master
+        with:
+          swap-size-gb: 5
+
+      - name: 安裝所需嘅環境
+        run: |
+          sudo apt-get update
+          sudo apt-get install git automake flex lzop bison gperf build-essential zip curl zlib1g-dev g++-multilib libxml2-utils bzip2 libbz2-dev libbz2-1.0 libghc-bzlib-dev squashfs-tools pngcrush schedtool dpkg-dev liblz4-tool make optipng maven libssl-dev pwgen libswitch-perl policycoreutils minicom libxml-sax-base-perl libxml-simple-perl bc libc6-dev-i386 lib32ncurses5-dev libx11-dev lib32z-dev libgl1-mesa-dev xsltproc unzip device-tree-compiler python2 python3
+          mkdir -p $GITHUB_WORKSPACE/workdir
+          cd $GITHUB_WORKSPACE/workdir
+          echo "BUILD_TIME=$(TZ=Asia/Shanghai date "+%Y%m%d%H%M")" >> $GITHUB_ENV
+
+      - name: 獲取 AOSP Clang-r450784d 工具鏈
+        run: |
+          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz -O $GITHUB_WORKSPACE/workdir/aosp_clang-r450784d.tar.gz
+          mkdir $GITHUB_WORKSPACE/workdir/clang
+          tar zxvf $GITHUB_WORKSPACE/workdir/aosp_clang-r450784d.tar.gz -C $GITHUB_WORKSPACE/workdir/clang
+
+      - name: 獲取 GCC4.9 工具鏈
+        run: |
+          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-9.0.0_r61 --depth=1 $GITHUB_WORKSPACE/workdir/gcc
+
+      - name: 獲取核心源碼
+        run: |
+          git clone --recursive https://github.com/$GITHUB_REPOSITORY/ -b ${{ steps.branch-names.outputs.current_branch }} --depth 1 $GITHUB_WORKSPACE/workdir/source
+
+      - name: 設定 Ccache 嘅容量
+        uses: hendrikmuhs/ccache-action@v1.2
+        with:
+         key: build-kernel-mido-kernel
+         max-size: 2G
+
+      - name: 編譯核心
+        run: |
+          export KBUILD_BUILD_HOST=Github-Action
+          export KBUILD_BUILD_USER=$(echo ${{ github.actor }})
+          export ARCH="arm64"
+          export SUBARCH="arm64"
+          export CROSS_COMPILE="$GITHUB_WORKSPACE/workdir/gcc/bin/aarch64-linux-android-"          
+          export PATH="$GITHUB_WORKSPACE/workdir/clang/bin:$GITHUB_WORKSPACE/workdir/gcc/bin/:$PATH"
+          export LLVM=1
+          export CC="ccache clang"
+          export LD="ld.lld"
+          cd $GITHUB_WORKSPACE/workdir/source
+          make O=out vendor/sdm660-perf_defconfig
+          make -j$(nproc --all) O=out 2>&1 | tee kernel.log
+
+      - name: 上傳編譯日志
+        uses: actions/upload-artifact@v4
+        with:
+          name: android_kernel_qcom_sdm660_${{ env.BUILD_TIME }}_kernel.log
+          path: workdir/source/kernel.log
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: KERNEL
+          path: workdir/source/arch/arm64/boot/Image.gz-dtb
+        
