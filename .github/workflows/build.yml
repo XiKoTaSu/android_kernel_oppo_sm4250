@@ -48,7 +48,7 @@ jobs:
           export ARCH="arm64"
           export SUBARCH="arm64"
           export CROSS_COMPILE="$GITHUB_WORKSPACE/workdir/gcc/bin/aarch64-linux-android-"          
-          export PATH="$GITHUB_WORKSPACE/workdir/clang/bin"
+          export PATH="$GITHUB_WORKSPACE/workdir/clang/bin:$PATH"
           export LLVM=1
           export CC="ccache clang"
           export LD="ld.lld"
@@ -66,5 +66,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: KERNEL
-          path: workdir/source/arch/arm64/boot/Image.gz-dtb
+          path: workdir/source/arch/arm64/boot/Image.gz
         
