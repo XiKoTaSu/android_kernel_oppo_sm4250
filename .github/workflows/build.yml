@@ -24,13 +24,11 @@ jobs:
           mkdir -p $GITHUB_WORKSPACE/workdir
           cd $GITHUB_WORKSPACE/workdir
           echo "BUILD_TIME=$(TZ=Asia/Shanghai date "+%Y%m%d%H%M")" >> $GITHUB_ENV
-
-      - name: 獲取 AOSP Clang-r450784d 工具鏈
+      - name: 獲取 ZyCromerZ-Clang20 工具鏈
         run: |
-          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/android13-release/clang-r450784d.tar.gz -O $GITHUB_WORKSPACE/workdir/aosp_clang-r450784d.tar.gz
+          wget https://github.com/ZyCromerZ/Clang/releases/download/20.0.0git-20241109-release/Clang-20.0.0git-20241109.tar.gz -O $GITHUB_WORKSPACE/workdir/zyc_clang20.tar.gz
           mkdir $GITHUB_WORKSPACE/workdir/clang
-          tar zxvf $GITHUB_WORKSPACE/workdir/aosp_clang-r450784d.tar.gz -C $GITHUB_WORKSPACE/workdir/clang
-
+          tar zxvf $GITHUB_WORKSPACE/workdir/zyc_clang20.tar.gz -C $GITHUB_WORKSPACE/workdir/clang
       - name: 獲取核心源碼
         run: |
           git clone --recursive https://github.com/$GITHUB_REPOSITORY/ -b ${{ steps.branch-names.outputs.current_branch }} --depth 1 $GITHUB_WORKSPACE/workdir/source
