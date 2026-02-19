@@ -31,10 +31,6 @@ jobs:
           mkdir $GITHUB_WORKSPACE/workdir/clang
           tar zxvf $GITHUB_WORKSPACE/workdir/aosp_clang-r450784d.tar.gz -C $GITHUB_WORKSPACE/workdir/clang
 
-      - name: 獲取 GCC4.9 工具鏈
-        run: |
-          git clone https://android.googlesource.com/platform/prebuilts/gcc/linux-x86/aarch64/aarch64-linux-android-4.9 -b android-9.0.0_r61 --depth=1 $GITHUB_WORKSPACE/workdir/gcc
-
       - name: 獲取核心源碼
         run: |
           git clone --recursive https://github.com/$GITHUB_REPOSITORY/ -b ${{ steps.branch-names.outputs.current_branch }} --depth 1 $GITHUB_WORKSPACE/workdir/source
@@ -52,12 +48,12 @@ jobs:
           export ARCH="arm64"
           export SUBARCH="arm64"
           export CROSS_COMPILE="$GITHUB_WORKSPACE/workdir/gcc/bin/aarch64-linux-android-"          
-          export PATH="$GITHUB_WORKSPACE/workdir/clang/bin:$GITHUB_WORKSPACE/workdir/gcc/bin/:$PATH"
+          export PATH="$GITHUB_WORKSPACE/workdir/clang/bin"
           export LLVM=1
           export CC="ccache clang"
           export LD="ld.lld"
           cd $GITHUB_WORKSPACE/workdir/source
-          make O=out vendor/sdm660-perf_defconfig
+          make O=out vendor/bengal-perf_defconfig
           make -j$(nproc --all) O=out 2>&1 | tee kernel.log
 
       - name: 上傳編譯日志
